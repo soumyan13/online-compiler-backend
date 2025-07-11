@@ -1,0 +1,14 @@
+# Folders
+node_modules/
+temp/
+.git/
+.vscode/
+package-lock.json
+
+# Files
+*.log
+.env
+.DS_Store
+
+# OS junk
+Thumbs.db
