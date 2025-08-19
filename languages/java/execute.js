@@ -1,21 +1,55 @@
 const fs = require("fs");
 const path = require("path");
-const { exec } = require("child_process");
+const pty = require("node-pty");
 
-const runJava = (code, callback) => {
-  const tempDir = path.join(__dirname, "../../temp");
-  const filepath = path.join(tempDir, "Main.java");
-  fs.writeFileSync(filepath, code, { encoding: "utf8" });
+const extractClassName = (code) => {
+  const match = code.match(/public\s+class\s+([A-Za-z_][A-Za-z0-9_]*)/);
+  return match ? match[1] : "Main";
+};
 
-  const command = `javac -encoding UTF-8 Main.java && java Main`;
+const runJava = (code, ws) => {
+  const tempDir = path.join(__dirname, "../temp");
+  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-  exec(command, { cwd: tempDir }, (err, stdout, stderr) => {
+  const className = extractClassName(code);
+  const filename = `${className}.java`;
+  const filepath = path.join(tempDir, filename);
+
+  fs.writeFileSync(filepath, code, "utf8");
+
+  const dockerCmd = [
+    "run",
+    "--rm",
+    "-i",
+    "-v",
+    `${tempDir}:/app`,
+    "openjdk:latest",
+    "bash",
+    "-c",
+    ` cd /app && javac ${filename} && java ${className}`,
+  ];
+
+  // const shell = process.platform === "win32" ? "cmd.exe" : "bash";
+
+  const ptyProcess = pty.spawn("docker", dockerCmd, {
+    name: "xterm-color",
+    cwd: process.cwd(),
+    env: process.env,
+  });
+
+  ws.ptyProcess = ptyProcess;
+
+  ptyProcess.onData((data) => {
+    ws.send(data); // stream output to frontend
+  });
+
+  ptyProcess.onExit(() => {
     try {
       fs.unlinkSync(filepath);
-      fs.unlinkSync(path.join(tempDir, "Main.class"));
+      const classFile = path.join(tempDir, `${className}.class`);
+      if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
     } catch (_) {}
-    if (err) return callback(stderr || err.message);
-    return callback(null, stdout);
+    ws.ptyProcess = null;
   });
 };
 

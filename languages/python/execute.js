@@ -1,14 +1,12 @@
 const fs = require("fs");
 const path = require("path");
 const pty = require("node-pty");
-const { v4: uuid } = require("uuid");
 
-const runJS = (code, ws) => {
+const runPython = (code, ws) => {
   const tempDir = path.join(__dirname, "../temp");
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-  const id = uuid();
-  const filename = `${id}.js`;
+  const filename = "main.py";
   const filepath = path.join(tempDir, filename);
 
   fs.writeFileSync(filepath, code, "utf8");
@@ -16,19 +14,17 @@ const runJS = (code, ws) => {
   const dockerCmd = [
     "run",
     "--rm",
-    "-it",
+    "-i",
     "-v",
     `${tempDir}:/app`,
-    "node:18",
+    "python:latest", // official Python image
     "bash",
     "-c",
-    `cd /app && node ${filename}; exec bash`,
+    `cd /app && python ${filename}`,
   ];
 
   const ptyProcess = pty.spawn("docker", dockerCmd, {
     name: "xterm-color",
-    cols: 80,
-    rows: 30,
     cwd: process.cwd(),
     env: process.env,
   });
@@ -36,19 +32,15 @@ const runJS = (code, ws) => {
   ws.ptyProcess = ptyProcess;
 
   ptyProcess.onData((data) => {
-    ws.send(data);
+    ws.send(data); // stream live output
   });
 
-  ws.on("message", (msg) => {
-    ptyProcess.write(msg);
-  });
-
-  ws.on("close", () => {
+  ptyProcess.onExit(() => {
     try {
       fs.unlinkSync(filepath);
     } catch (_) {}
-    ptyProcess.kill();
+    ws.ptyProcess = null;
   });
 };
 
-module.exports = runJS;
+module.exports = runPython;

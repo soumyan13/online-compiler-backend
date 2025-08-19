@@ -1,21 +1,52 @@
 const express = require("express");
+const http = require("http");
 const cors = require("cors");
-const { runCode } = require("./execute");
+const WebSocket = require("ws");
+const runCode = require("./execute");
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
 app.use(cors());
 app.use(express.json());
 
-app.post("/run", async (req, res) => {
-  const { code, language } = req.body;
+// Basic health route (optional)
+app.get("/", (req, res) => {
+  res.send("✅ Compiler backend is live.");
+});
 
-  if (!code || !language)
-    return res.status(400).json({ output: "Code or language missing." });
+// WebSocket connection
+wss.on("connection", (ws) => {
+  console.log("🔌 WebSocket client connected");
 
-  runCode(code, language, (err, output) => {
-    if (err) return res.json({ output: err });
-    res.json({ output });
+  ws.on("message", (message) => {
+    try {
+      // First message: JSON with code + language
+      const { language, code } = JSON.parse(message);
+      runCode(language, code, ws);
+    } catch (e) {
+      // Later messages are user keystrokes (not JSON)
+      if (ws.ptyProcess) {
+        ws.ptyProcess.write(message);
+      } else {
+        // ws.send("❌ No process running.");
+        return;
+      }
+    }
+  });
+
+  ws.on("close", () => {
+    if (ws.ptyProcess) {
+      ws.ptyProcess.kill();
+      ws.ptyProcess = null;
+    }
+    console.log("🔌 WebSocket client disconnected");
   });
 });
 
-app.listen(5000, () => console.log("🚀 Backend running on http://localhost:5000"));
+// Start the server
+const PORT = 5000;
+server.listen(PORT, () =>
+  console.log(`🚀 Backend (HTTP + WS) running on http://localhost:${PORT}`)
+);

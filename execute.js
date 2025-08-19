@@ -1,18 +1,32 @@
-const runJS = require("./languages/javascript/execute");
-const runC = require("./languages/c/execute");
 const runJava = require("./languages/java/execute");
+const runC = require("./languages/c/execute");
+const runJavaScript = require("./languages/javascript/execute");
+const runPython = require("./languages/python/execute");
+const runCpp = require("./languages/cpp/execute");
 
-const runCode = (code, language, callback) => {
-  switch (language) {
-    case "javascript":
-      return runJS(code, callback);
-    case "c":
-      return runC(code, callback);
+const runCode = (language, code, input, ws) => {
+  switch (language.toLowerCase()) {
     case "java":
-      return runJava(code, callback);
+      runJava(code, input, ws);
+      break;
+    case "c":
+      runC(code, input, ws);
+      break;
+    case "javascript":
+    case "js":
+      runJavaScript(code, input, ws);
+      break;
+    case "c++":
+    case "cpp":
+      runCpp(code, input, ws);
+      break;
+    case "python":
+    case "py":
+      runPython(code, input, ws);
+      break;
     default:
-      return callback("❌ Unsupported language");
+      ws.send("❌ Language not supported");
   }
 };
 
-module.exports = { runCode };
+module.exports = runCode;
