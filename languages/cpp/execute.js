@@ -10,45 +10,46 @@ const runCpp = (code, ws) => {
   const id = uuid();
   const filename = `${id}.cpp`;
   const filepath = path.join(tempDir, filename);
-  const executable = `${id}`;
+  const executable = `${id}.out`;
 
   // Save C++ code to file
   fs.writeFileSync(filepath, code, "utf8");
 
-  // Docker command for compiling and running C++ interactively
-  const dockerCmd = [
-    "run",
-    "--rm",
-    "-i", // Interactive mode for user input
-    "-v",
-    `${tempDir}:/app`,
-    "gcc:latest",
-    "bash",
-    "-c",
-    `cd /app && g++ ${filename} -o ${executable} && ./${executable}`,
-  ];
-
-  const ptyProcess = pty.spawn("docker", dockerCmd, {
+  // Step 1: Compile
+  const compile = pty.spawn("g++", [filename, "-o", executable], {
     name: "xterm-color",
-    cwd: process.cwd(),
+    cwd: tempDir,
     env: process.env,
   });
 
-  ws.ptyProcess = ptyProcess;
+  ws.ptyProcess = compile;
 
-  // Send program output to frontend
-  ptyProcess.onData((data) => {
-    ws.send(data);
-  });
+  compile.onData((data) => ws.send(data));
 
-  // Cleanup when process exits
-  ptyProcess.onExit(() => {
-    try {
-      fs.unlinkSync(filepath);
-      const execPath = path.join(tempDir, executable);
-      if (fs.existsSync(execPath)) fs.unlinkSync(execPath);
-    } catch (_) {}
-    ws.ptyProcess = null;
+  compile.onExit(({ exitCode }) => {
+    if (exitCode === 0) {
+      // Step 2: Run if compilation succeeded
+      const run = pty.spawn(`./${executable}`, [], {
+        name: "xterm-color",
+        cwd: tempDir,
+        env: process.env,
+      });
+
+      ws.ptyProcess = run;
+
+      run.onData((data) => ws.send(data));
+
+      run.onExit(() => {
+        try {
+          fs.unlinkSync(filepath);
+          const execPath = path.join(tempDir, executable);
+          if (fs.existsSync(execPath)) fs.unlinkSync(execPath);
+        } catch (_) {}
+        ws.ptyProcess = null;
+      });
+    } else {
+      ws.ptyProcess = null;
+    }
   });
 };
 

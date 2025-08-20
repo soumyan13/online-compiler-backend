@@ -10,38 +10,29 @@ const runC = (code, ws) => {
   const id = uuid();
   const filename = `${id}.c`;
   const filepath = path.join(tempDir, filename);
-  const executable = `${id}`;
+  const executable = path.join(tempDir, `${id}.out`);
 
   fs.writeFileSync(filepath, code, "utf8");
 
-  // Docker command broken into parts
-  const dockerArgs = [
-    "run",
-    "--rm",
-    "-it", // <-- Required for interactive mode
-    "-v",
-    `${tempDir}:/app`,
-    "gcc:latest",
-    "bash",
-    "-c",
-    `cd /app && gcc ${filename} -o ${executable} && ./${executable}`,
-  ];
+  // 🔥 Directly run gcc instead of docker
+  const compileCmd = `gcc ${filepath} -o ${executable} && ${executable}`;
 
-  const ptyProcess = pty.spawn("docker", dockerArgs, {
+  const ptyProcess = pty.spawn("bash", ["-c", compileCmd], {
     name: "xterm-color",
     cols: 80,
     rows: 30,
-    cwd: process.cwd(),
+    cwd: tempDir,
     env: process.env,
   });
 
   ws.ptyProcess = ptyProcess;
-  // Send container output to frontend
+
+  // Output from compiler/program → frontend
   ptyProcess.onData((data) => {
     ws.send(data);
   });
 
-  // Handle input from frontend
+  // Input from frontend → program
   ws.on("input", (msg) => {
     ptyProcess.write(msg);
   });
@@ -49,9 +40,8 @@ const runC = (code, ws) => {
   // Cleanup on socket close
   ws.on("close", () => {
     try {
-      fs.unlinkSync(filepath);
-      const execFile = path.join(tempDir, executable);
-      if (fs.existsSync(execFile)) fs.unlinkSync(execFile);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+      if (fs.existsSync(executable)) fs.unlinkSync(executable);
     } catch (_) {}
     ptyProcess.kill();
   });

@@ -17,39 +17,43 @@ const runJava = (code, ws) => {
 
   fs.writeFileSync(filepath, code, "utf8");
 
-  const dockerCmd = [
-    "run",
-    "--rm",
-    "-i",
-    "-v",
-    `${tempDir}:/app`,
-    "openjdk:latest",
-    "bash",
-    "-c",
-    ` cd /app && javac ${filename} && java ${className}`,
-  ];
-
-  // const shell = process.platform === "win32" ? "cmd.exe" : "bash";
-
-  const ptyProcess = pty.spawn("docker", dockerCmd, {
+  // Step 1: compile with javac
+  const compile = pty.spawn("javac", [filename], {
     name: "xterm-color",
-    cwd: process.cwd(),
+    cwd: tempDir,
     env: process.env,
   });
 
-  ws.ptyProcess = ptyProcess;
+  ws.ptyProcess = compile;
 
-  ptyProcess.onData((data) => {
-    ws.send(data); // stream output to frontend
+  compile.onData((data) => {
+    ws.send(data);
   });
 
-  ptyProcess.onExit(() => {
-    try {
-      fs.unlinkSync(filepath);
-      const classFile = path.join(tempDir, `${className}.class`);
-      if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
-    } catch (_) {}
-    ws.ptyProcess = null;
+  compile.onExit(({ exitCode }) => {
+    if (exitCode === 0) {
+      // Step 2: run with java if compilation succeeds
+      const run = pty.spawn("java", [className], {
+        name: "xterm-color",
+        cwd: tempDir,
+        env: process.env,
+      });
+
+      ws.ptyProcess = run;
+
+      run.onData((data) => ws.send(data));
+
+      run.onExit(() => {
+        try {
+          fs.unlinkSync(filepath);
+          const classFile = path.join(tempDir, `${className}.class`);
+          if (fs.existsSync(classFile)) fs.unlinkSync(classFile);
+        } catch (_) {}
+        ws.ptyProcess = null;
+      });
+    } else {
+      ws.ptyProcess = null;
+    }
   });
 };
 

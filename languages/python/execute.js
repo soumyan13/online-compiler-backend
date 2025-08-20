@@ -1,45 +1,47 @@
 const fs = require("fs");
 const path = require("path");
 const pty = require("node-pty");
+const { v4: uuid } = require("uuid");
 
 const runPython = (code, ws) => {
   const tempDir = path.join(__dirname, "../temp");
   if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-  const filename = "main.py";
+  const id = uuid();
+  const filename = `${id}.py`;
   const filepath = path.join(tempDir, filename);
 
   fs.writeFileSync(filepath, code, "utf8");
 
-  const dockerCmd = [
-    "run",
-    "--rm",
-    "-i",
-    "-v",
-    `${tempDir}:/app`,
-    "python:latest", // official Python image
-    "bash",
-    "-c",
-    `cd /app && python ${filename}`,
-  ];
+  // 🔥 Directly run python instead of docker
+  const runCmd = `python3 ${filepath}`;
 
-  const ptyProcess = pty.spawn("docker", dockerCmd, {
+  const ptyProcess = pty.spawn("bash", ["-c", runCmd], {
     name: "xterm-color",
-    cwd: process.cwd(),
+    cols: 80,
+    rows: 30,
+    cwd: tempDir,
     env: process.env,
   });
 
   ws.ptyProcess = ptyProcess;
 
+  // Output from program → frontend
   ptyProcess.onData((data) => {
-    ws.send(data); // stream live output
+    ws.send(data);
   });
 
-  ptyProcess.onExit(() => {
+  // Input from frontend → program
+  ws.on("input", (msg) => {
+    ptyProcess.write(msg);
+  });
+
+  // Cleanup on socket close
+  ws.on("close", () => {
     try {
-      fs.unlinkSync(filepath);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
     } catch (_) {}
-    ws.ptyProcess = null;
+    ptyProcess.kill();
   });
 };
 
